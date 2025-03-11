@@ -177,16 +177,13 @@ class CSSColorParser:
         if not color_str:
             raise ValueError("Empty color string")
 
-        # 颜色名称解析
         if color_str in cls.COLORS:
             r, g, b = cls.COLORS[color_str]
             return (r/255.0, g/255.0, b/255.0, 1.0)
 
-        # 十六进制解析
         if color_str.startswith('#'):
             return cls._parse_hex(color_str)
 
-        # RGB/RGBA解析
         if color_str.startswith(('rgb', 'rgba')):
             return cls._parse_rgb(color_str)
 
@@ -200,13 +197,11 @@ class CSSColorParser:
         if length not in (3, 4, 6, 8):
             raise ValueError(f"Invalid hex color: {color_str}")
 
-        # 扩展短格式
         if length in (3, 4):
             hex_str = ''.join([c*2 for c in hex_str])
             length = len(hex_str)
 
         try:
-            # 解析颜色分量
             components = [int(hex_str[i:i+2], 16) for i in range(0, length, 2)]
             r = components[0] / 255.0
             g = components[1] / 255.0
@@ -219,7 +214,6 @@ class CSSColorParser:
 
     @classmethod
     def _parse_rgb(cls, color_str):
-        # 提取参数部分
         match = re.match(r'^rgba?\((.*)\)$', color_str, re.IGNORECASE)
         if not match:
             raise ValueError(f"Invalid RGB format: {color_str}")
@@ -233,7 +227,6 @@ class CSSColorParser:
         if len(components) not in (3, 4):
             raise ValueError(f"Invalid RGB components: {color_str}")
 
-        # 解析颜色分量
         r = cls._parse_component(components[0], max_val=255)
         g = cls._parse_component(components[1], max_val=255)
         b = cls._parse_component(components[2], max_val=255)
@@ -249,7 +242,6 @@ class CSSColorParser:
         else:
             value = float(component)
         
-        # 标准化数值范围
         normalized = value / (255.0 if max_val ==255 else 1.0)
         return max(0.0, min(1.0, normalized))
 
@@ -259,81 +251,74 @@ class CSSFont:
         self._parse_font_str(font_str)
     
     def _parse_font_str(self, font_str):
-        """解析CSS font字符串的正则表达式增强版"""
         pattern = re.compile(r"""
-            ^  # 开头
-            (?:  # 可选的 font-style（如 italic）
+            ^
+            (?:
                 (?:italic|oblique|normal)(?:\s+(?:italic|oblique|normal))*\s+
             )?
-            (?:  # 可选的 font-variant（如 small-caps）
+            (?:
                 (?:small-caps|normal)(?:\s+(?:small-caps|normal))*\s+
             )?
-            (?:  # 可选的 font-weight（如 bold）
+            (?:
                 (?:bold|lighter|bolder|\d{3}|normal)(?:\s+(?:bold|lighter|bolder|\d{3}|normal))*\s+
             )?
-            (\d+\.?\d*)  # 必要的字号值（如 20）
-            (px|pt|em|mm)?  # 可选的单位
-            (?:  # 可选的行高（以 / 分隔）
+            (\d+\.?\d*)
+            (px|pt|em|mm)?
+            (?:
                 \s*/\s*
-                (\d+\.?\d*)  # 行高值
-                (px|pt|em|mm)?  # 行高单位
+                (\d+\.?\d*)
+                (px|pt|em|mm)?
                 \s*
             )?
-            (?:  # 可选的第二个行高（通常不需要，但保留原逻辑）
+            (?:
                 \s*/\s*
-                (\d+\.?\d*)  # 第二个行高值
-                (px|pt|em|mm)?  # 第二个行高单位
+                (\d+\.?\d*)
+                (px|pt|em|mm)?
                 \s*
             )?
-            \s+  # 必须有空格分隔字体族
-            (  # 字体族部分
-                (?:'[^']*'|"[^"]*"|\w+(?:\s+\w+)*)  # 支持带引号或无引号的多单词字体名
-                (?:  # 允许逗号分隔的多个字体族
+            \s+
+            (
+                (?:'[^']*'|"[^"]*"|\w+(?:\s+\w+)*)
+                (?:
                     \s*,\s*
                     (?:'[^']*'|"[^"]*"|\w+(?:\s+\w+)*)  
                 )*
             )
-            $  # 结尾
+            $
         """, re.VERBOSE | re.IGNORECASE)
 
         match = pattern.match(font_str.strip())
         if not match:
             raise ValueError(f"Invalid font format: {font_str}")
 
-        # 提取解析结果
-        self.font_style = match.group(1) or 'normal'  # 若存在font-style组则需调整
+        self.font_style = match.group(1) or 'normal'
         self.font_variant = match.group(2) or 'normal'
         self.font_weight = match.group(3) or 'normal'
-        self._parse_size(match)      # 处理字号和单位
-        self._parse_font_family(match.group(7))  # 字体族改为group(7)
+        self._parse_size(match)
+        self._parse_font_family(match.group(7))
 
     def _parse_size(self, match):
-        """解析字号和单位转换"""
-        # 基础字号（第一个尺寸值）
-        size_val = float(match.group(1))  # 修正为 group(1)
-        size_unit = match.group(2) or 'px'  # 修正为 group(2)
+        size_val = float(match.group(1))
+        size_unit = match.group(2) or 'px'
         self.font_size = self._convert_unit(size_val, size_unit)
 
-        # 行高（第二个尺寸值）
-        if match.group(3):  # 行高值的分组索引调整为 group(3)
+        if match.group(3):
             line_height_val = float(match.group(3))
-            line_height_unit = match.group(4) or 'px'  # 行高单位为 group(4)
+            line_height_unit = match.group(4) or 'px'
             self.line_height = self._convert_unit(line_height_val, line_height_unit)
         else:
             self.line_height = None
 
     def _convert_unit(self, value, unit):
-        """单位转换到像素（简化版）"""
         conversions = {
             'px': lambda x: x,
-            'pt': lambda x: x * 1.3333,  # 1pt ≈ 1.3333px
-            'em': lambda x: x * 16,       # 假设基础字号16px
-            'mm': lambda x: x * 3.7795    # 1mm ≈ 3.7795px
+            'pt': lambda x: x * 1.3333,
+            'em': lambda x: x * 16,
+            'mm': lambda x: x * 3.7795
         }
         return conversions[unit.lower()](value) if unit in conversions else value
 
     def _parse_font_family(self, family_str):
-        """处理字体族解析"""
         families = []
         current = []
         in_quote = False
@@ -363,7 +348,6 @@ class CSSFont:
         self.font_family = families
 
     def apply_to_text(self, text_widget):
-        """应用属性到TextInput控件"""
         if self.font_size:
             text_widget.font_size = self.font_size
         if self.font_family:
@@ -372,16 +356,13 @@ class CSSFont:
         self._apply_font_weight(text_widget)
 
     def _get_kivy_font_name(self):
-        """转换字体族为Kivy兼容格式"""
         kivy_fonts = []
         for font in self.font_family:
-            # 移除引号并处理空格
-            font = font.strip('\'"')  # 去除可能存在的引号
+            font = font.strip('\'"')
             kivy_fonts.append(font)
         return ','.join(kivy_fonts)
 
     def _apply_font_style(self, widget):
-        """应用斜体样式"""
         if 'italic' in self.font_style.lower() or 'oblique' in self.font_style.lower():
             widget.font_style = 'italic'
 
@@ -397,7 +378,7 @@ class TextMetrics:
         self._label = label
         self._ctx = context
         self._texture = label.texture if label else None
-        self._extents = label.get_extents(label.text) if label.text else None  # (width, height)
+        self._extents = label.get_extents(label.text) if label.text else None
 
     @property
     def width(self) -> float:
@@ -827,7 +808,7 @@ class Canvas2DContext(Widget):
 
         with self.canvas:
             Color(1, 1, 1, 1)
-            self.___rect = Rectangle(pos=self.pos, size=self.size) # 白色背景
+            self.___rect = Rectangle(pos=self.pos, size=self.size)
     
     def clearRect(self, x, y, width, height):
         with self.canvas:
@@ -910,19 +891,19 @@ class Canvas2DContext(Widget):
 
         match self.textBaseline:
             case 'top':
-                y_adjust = -metrics.ascent  # 文本顶部对齐
+                y_adjust = -metrics.ascent
             case 'hanging':
                 y_adjust = -metrics.hangingBaseline
             case 'middle':
-                y_adjust = -font_height / 2  # 垂直居中
+                y_adjust = -font_height / 2
             case 'alphabetic':
                 y_adjust = -metrics.alphabeticBaseline
             case 'ideographic':
                 y_adjust = -metrics.ideographicBaseline
             case 'bottom':
-                y_adjust = -font_height  # 文本底部对齐
+                y_adjust = -font_height
             case _:
-                y_adjust = -metrics.alphabeticBaseline  # 默认字母基线
+                y_adjust = -metrics.alphabeticBaseline
             
         with self.canvas:
             PushMatrix()
