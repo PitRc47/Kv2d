@@ -931,12 +931,14 @@ class Canvas2DContext(Widget):
             size=(text_width * scale_factor, -text_height * scale_factor)
             Scale(x = 1,y = -1, origin = pos)
             Translate(x=0, y=-size[1])
+            self._beginClip()
             Color(*self._apply_global_alpha(self.fillStyle))
             Rectangle(
                 pos=pos,
                 size=size,
                 texture=texture
             )
+            self._endClip()
             PopMatrix()
 
 
@@ -982,11 +984,9 @@ class Canvas2DContext(Widget):
             case _:
                 y_adjust = -ascent
 
-        # 应用坐标调整
         pos = (x, y + y_adjust)
         size = (text_width * scale_factor, text_height * scale_factor)
 
-        # 生成描边偏移量（圆形分布）
         radius = int(self.lineWidth)
         offsets = []
         for dx in range(-radius, radius+1):
@@ -994,10 +994,10 @@ class Canvas2DContext(Widget):
                 if dx*dx + dy*dy <= radius*radius:
                     offsets.append((dx, dy))
 
-        # 绘制描边（多偏移量绘制）
         with self.canvas:
             PushMatrix()
             self._applyMatrix()
+            self._beginClip()
             Color(*self._apply_global_alpha(self.strokeStyle))
             for dx, dy in offsets:
                 # 应用缩放因子到偏移量
@@ -1008,10 +1008,10 @@ class Canvas2DContext(Widget):
                     size=size,
                     texture=texture
                 )
+            self._endClip()
             PopMatrix()
 
     def measureText(self, text: str) -> dict:
-        """完整字体度量实现"""
         label = CoreLabel(
             text=text,
             font_size=self.font_size,
@@ -1021,7 +1021,6 @@ class Canvas2DContext(Widget):
         label.refresh()
         return TextMetrics(label, self)
 
-    #---------- 路径 API ----------
     def beginPath(self) -> None:
         self._current_path = Path2D()
 
@@ -1230,12 +1229,14 @@ class Canvas2DContext(Widget):
             size = (dw, -dh) if dh else (sw, -sh)
             Scale(x = 1,y = -1, origin = pos)
             Translate(x=0, y=-size[1])
+            self._beginClip()
             Color(1, 1, 1, self._globalAlpha)
             Rectangle(
                 texture=source_region,
                 pos=pos,
                 size=size
             )
+            self._endClip()
             PopMatrix()
 
     def save(self) -> None:
@@ -1302,7 +1303,7 @@ if __name__ == '__main__':
             with ctx:
                 ctx.reset()
 
-                ctx.font = '20px Phigros'
+                ctx.font = '40px Phigros'
                 ctx.fillStyle = 'red'
 
                 ctx.beginPath()
@@ -1312,6 +1313,8 @@ if __name__ == '__main__':
                 ctx.beginPath()
                 ctx.rect(70, 70, 800, 800)
                 ctx.stroke()
+
+                ctx.fillText('Hello World!', 100, 100)
                 
             time.sleep(1 / 60)
 
