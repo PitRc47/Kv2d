@@ -587,7 +587,6 @@ class Canvas2DContext(Widget):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.endDraw()
     
-    #---------- 样式属性 ----------
     @property
     def lineWidth(self) -> float:
         return self._line_width
@@ -661,7 +660,6 @@ class Canvas2DContext(Widget):
     def globalAlpha(self, value: float) -> None:
         self._globalAlpha = max(0.0, min(1.0, value))
 
-    #以下为内部方法
     def _update_rect(self, *args):
         self.___rect.pos = self.pos
         self.___rect.size = self.size
@@ -795,7 +793,6 @@ class Canvas2DContext(Widget):
         if self._clip_path:
             StencilPop()
 
-    #以下为暴露的方法
     def beginDraw(self):
         while self._lock: pass
         self._drawInsts = []
@@ -879,7 +876,7 @@ class Canvas2DContext(Widget):
                 (x + width, -y),
                 (x + width, -y - height),
                 (x, -y - height),
-                (x, -y)  # 闭合路径
+                (x, -y)
             ]
             transformed_points = [self._apply_transform_to_point(*point) for point in points]
             flattened_points = []
@@ -946,13 +943,11 @@ class Canvas2DContext(Widget):
 
 
     def strokeText(self, text: str, x: float, y: float, max_width: float = None) -> None:
-        """实现描边文本功能"""
         y = -y
-        # 创建核心标签对象
         label = CoreLabel(
             text=text,
             font_size=self.font_size,
-            font_name=self.font_name.split(',')[0],  # 取第一个可用字体
+            font_name=self.font_name.split(',')[0],
             valign='top'
         )
         label.refresh()
@@ -1003,7 +998,6 @@ class Canvas2DContext(Widget):
             self._beginClip()
             Color(*self._apply_global_alpha(self.strokeStyle))
             for dx, dy in offsets:
-                # 应用缩放因子到偏移量
                 scaled_dx = dx * scale_factor
                 scaled_dy = dy * scale_factor
                 Rectangle(
