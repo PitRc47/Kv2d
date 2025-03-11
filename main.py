@@ -791,11 +791,8 @@ class Canvas2DContext(Widget):
         self._fill_style = (0, 0, 0, 1)
         self._stroke_style = (0, 0, 0, 1)
         self._line_width = 1.0
-        self.font_size = 14
-        self.font_name = 'Arial'
         self._text_align = 'left'
         self._text_baseline = 'alphabetic'
-        self._font = '10px sans-serif'
         self._clip_path = None
         self._clip_fill_rule = 'nonzero'
         self._state_stack = []
@@ -803,6 +800,8 @@ class Canvas2DContext(Widget):
         self._globalAlpha = 1
         self._current_path = Path2D()
         self._combined_matrix = None
+
+        self.font = '10px sans-serif'
         
         self.canvas.clear()
 
@@ -819,12 +818,15 @@ class Canvas2DContext(Widget):
             PopMatrix()
 
     def fillRect(self, x, y, width, height):
+        y = -y
+        
         with self.canvas:
             PushMatrix()
             self._applyMatrix()
-            y = -y
+            
             Scale(x = 1, y = -1, origin = (x, y))
             Translate(x = 0, y = height)
+
             points = [
                 (x, -y),
                 (x + width, -y),
