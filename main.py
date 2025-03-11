@@ -771,13 +771,15 @@ class Canvas2DContext(Widget):
         if self._clip_path:
             StencilPush()
             
-            Color(1,1,1,1)
+            Color(1, 1, 1, 1)
             for subpath in self._clip_path:
                 if len(subpath) >= 3:
                     vertices = []
                     for point in subpath:
                         x, y = self._apply_transform_to_point(*point)
                         vertices.extend([x, y, 0, 0])
+                    Scale(x = 1, y = -1)
+                    Translate(x=0, y=Window.height)
                     Mesh(
                         vertices=vertices,
                         indices=list(range(len(subpath))),
@@ -791,8 +793,7 @@ class Canvas2DContext(Widget):
 
     def _endClip(self):
         if self._clip_path:
-            with self.canvas:
-                StencilPop()
+            StencilPop()
 
     #以下为暴露的方法
     def beginDraw(self):
@@ -1309,10 +1310,10 @@ if __name__ == '__main__':
                 ctx.fillStyle = 'red'
 
                 ctx.beginPath()
-                ctx.rect(50, 50, 200, 150)
+                ctx.rect(50, 700, 200, 150)
                 ctx.clip()
 
-                ctx.fillRect(100, 100, 800, 800)
+                ctx.fillRect(50, 50, 800, 800)
                 
             time.sleep(1 / 60)
 
