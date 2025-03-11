@@ -856,12 +856,14 @@ class Canvas2DContext(Widget):
             vertices = []
             for point in transformed_points:
                 vertices.extend([*point, 0, 0])
+            self._beginClip()
             Color(*self._apply_global_alpha(self.fillStyle))
             Mesh(
                 vertices=vertices,
                 indices=list(range(len(transformed_points))),
                 mode='triangle_fan'
             )
+            self._endClip()
             PopMatrix()
 
     def strokeRect(self, x, y, width, height):
@@ -1310,11 +1312,7 @@ if __name__ == '__main__':
                 ctx.rect(50, 50, 200, 150)
                 ctx.clip()
 
-                ctx.beginPath()
-                ctx.rect(70, 70, 800, 800)
-                ctx.stroke()
-
-                ctx.fillText('Hello World!', 100, 100)
+                ctx.fillRect(100, 100, 800, 800)
                 
             time.sleep(1 / 60)
 
