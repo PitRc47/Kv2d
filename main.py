@@ -800,8 +800,7 @@ class Canvas2DContext(Widget):
         self._globalAlpha = 1
         self._current_path = Path2D()
         self._combined_matrix = None
-
-        self.font = '10px sans-serif'
+        self._font = '10px sans-serif'
         
         self.canvas.clear()
 
