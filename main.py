@@ -4,12 +4,13 @@ from kivy.core.text import Label as CoreLabel, LabelBase
 from kivy.core.image import Image as CoreImage
 from kivy.clock import Clock
 from kivy.uix.widget import Widget
+from kivy.graphics.transformation import Matrix
 from kivy.graphics.texture import Texture
 from kivy.graphics.stencil_instructions import StencilPush, StencilPop, StencilUse
 from kivy.graphics import (
     RoundedRectangle, Color, Rectangle, Line,
     Mesh, PushMatrix, PopMatrix,
-    Rotate, Scale, Translate
+    Rotate, Scale, Translate, MatrixInstruction
 )
 
 import re
@@ -477,14 +478,14 @@ class Path2D:
         self.current_subpath = []
     
     def moveTo(self, x, y):
-        self.current_subpath = [(x, -y)]
+        self.current_subpath = [(x, y)]
         self.subpaths.append(self.current_subpath)
     
     def lineTo(self, x, y):
         if not self.current_subpath:
             self.moveTo(x, y)
         else:
-            self.current_subpath.append((x, -y))
+            self.current_subpath.append((x, y))
 
     def closePath(self):
         if self.current_subpath and len(self.current_subpath) >= 1:
@@ -492,8 +493,6 @@ class Path2D:
             self.current_subpath = []
     
     def rect(self, x, y, w, h):
-        y = -y
-        h = -h
         self.subpaths.append([
             (x, y), (x + w, y), (x + w, y + h), (x, y + h), (x, y)
         ])
@@ -507,9 +506,6 @@ class Path2D:
             'h': h,
             'radii': radii
         }
-        
-        y = -y
-        h = -h
         normalized_radii = self.normalize_radii(radii, w, h)
         
         self._shape_cache['round_rect']['params'] = {
@@ -557,6 +553,8 @@ class Canvas2DContext(Widget):
         self._warppedMethodsList = {}
         self._origPropertiesList = {}
         self._wrappedPropertiesList = {}
+
+        self._combined_matrix = Matrix()
 
         self.reset()
 
@@ -712,21 +710,11 @@ class Canvas2DContext(Widget):
                 doc=prop.__doc__
             )
             setattr(type(self), prop_name, new_prop)
-    
-    def _rotatectx(self):
-        Rotate(angle=self._rotation, origin=(0, 0))
-
-    def _scalectx(self):
-        Scale(x=self._scale_x, y=self._scale_y)
-
-    def _translatectx(self):
-        Translate(x=self._translate_x, y=self._translate_y)
 
     def _applyMatrix(self):
-        Translate(0, Window.height)
-        self._translatectx()
-        self._rotatectx()
-        self._scalectx()
+        Scale(x = 1, y = -1, z = 1)
+        Translate(0, -self.height)
+        MatrixInstruction().matrix = self._combined_matrix
 
     def _exce_draw(self, *args, **kwargs):
         self._restoreAll()
@@ -738,13 +726,6 @@ class Canvas2DContext(Widget):
     def _apply_global_alpha(self, color):
         r, g, b, a = color
         return (r, g, b, a * self._globalAlpha)
-
-    def _apply_transform_to_point(self, x, y):
-        if not self._combined_matrix: return x, y
-        a, b, c, d, e, f = self._combined_matrix
-        new_x = a * x + c * y + e
-        new_y = b * x + d * y + f
-        return new_x, new_y
     
     def _beginClip(self):
         if self._clip_path:
@@ -755,14 +736,13 @@ class Canvas2DContext(Widget):
                 if len(subpath) >= 3:
                     vertices = []
                     for point in subpath:
-                        x, y = self._apply_transform_to_point(*point)
-                        vertices.extend([x, y, 0, 0])
-                    Scale(x = 1, y = -1)
-                    Translate(x=0, y=Window.height)
+                        vertices.extend([*point, 0, 0])
+                    
                     Mesh(
                         vertices=vertices,
                         indices=list(range(len(subpath))),
-                        mode='triangle_fan'
+                        mode='triangle_fan',
+                        tex_coords=(0, 0, 1, 0, 1, 1, 0, 1)
                     )
             
             if self._clip_fill_rule == 'evenodd':
@@ -784,11 +764,8 @@ class Canvas2DContext(Widget):
         Clock.schedule_once(self._exce_draw, 0)
 
     def reset(self):
-        self._rotation = 0
-        self._scale_x = 1
-        self._scale_y = 1
-        self._translate_x = 0
-        self._translate_y = 0
+        self.resetTransform()
+
         self._fill_style = (0, 0, 0, 1)
         self._stroke_style = (0, 0, 0, 1)
         self._line_width = 1.0
@@ -800,7 +777,6 @@ class Canvas2DContext(Widget):
         self._filter = None
         self._globalAlpha = 1
         self._current_path = Path2D()
-        self._combined_matrix = None
         self._font = '10px sans-serif'
         
         self.canvas.clear()
@@ -814,36 +790,23 @@ class Canvas2DContext(Widget):
             PushMatrix()
             self._applyMatrix()
             Color(1, 1, 1, 1)
-            Rectangle(pos=(x, -y), size=(width, -height))
+            Rectangle(pos=(x, y), size=(width, height))
             PopMatrix()
 
     def fillRect(self, x, y, width, height):
-        y = -y
-        
         with self.canvas:
             PushMatrix()
             self._applyMatrix()
             
-            Scale(x = 1, y = -1, origin = (x, y))
-            Translate(x = 0, y = height)
-
-            points = [
-                (x, -y),
-                (x + width, -y),
-                (x + width, -y - height),
-                (x, -y - height)
-            ]
-            transformed_points = [self._apply_transform_to_point(*point) for point in points]
-            vertices = []
-            for point in transformed_points:
-                vertices.extend([*point, 0, 0])
             self._beginClip()
             Color(*self._apply_global_alpha(self.fillStyle))
-            Mesh(
-                vertices=vertices,
-                indices=list(range(len(transformed_points))),
-                mode='triangle_fan'
+
+            Rectangle(
+                pos=(x, y),
+                size=(width, height),
+                tex_coords=(0, 0, 1, 0, 1, 1, 0, 1)
             )
+
             self._endClip()
             PopMatrix()
 
@@ -851,27 +814,26 @@ class Canvas2DContext(Widget):
         with self.canvas:
             PushMatrix()
             self._applyMatrix()
-            y = -y
-            Scale(x = 1, y = -1, origin = (x, y))
-            Translate(x = 0, y = height)
-            points = [
-                (x, -y),
-                (x + width, -y),
-                (x + width, -y - height),
-                (x, -y - height),
-                (x, -y)
-            ]
-            transformed_points = [self._apply_transform_to_point(*point) for point in points]
-            flattened_points = []
-            for point in transformed_points:
-                flattened_points.extend(point)
+
+            self._beginClip()
             Color(*self._apply_global_alpha(self.strokeStyle))
-            Line(points=flattened_points, width=self.lineWidth)
+            
+            Line(
+                rectangle=(x, y, width, height),
+                width=self.lineWidth,
+                tex_coords=(0, 0, 1, 0, 1, 1, 0, 1)
+            )
+
+            self._endClip()
             PopMatrix()
 
     def fillText(self, text: str, x: float, y: float, max_width: float = None) -> None:
-        y = -y
-        label = CoreLabel(text=text, font_size=self.font_size, font_name=self.font_name.split(',')[0], valign='top')
+        label = CoreLabel(
+            text=text, 
+            font_size=self.font_size, 
+            font_name=self.font_name.split(',')[0], 
+            valign='top'
+        )
         label.refresh()
 
         texture = label.texture
@@ -910,23 +872,24 @@ class Canvas2DContext(Widget):
         with self.canvas:
             PushMatrix()
             self._applyMatrix()
+
             pos=(x, y + y_adjust)
-            size=(text_width * scale_factor, -text_height * scale_factor)
-            Scale(x = 1,y = -1, origin = pos)
-            Translate(x=0, y=-size[1])
+            size=(text_width * scale_factor, text_height * scale_factor)
+
             self._beginClip()
             Color(*self._apply_global_alpha(self.fillStyle))
+
             Rectangle(
                 pos=pos,
                 size=size,
-                texture=texture
+                texture=texture,
+                tex_coords=(0, 0, 1, 0, 1, 1, 0, 1)
             )
+
             self._endClip()
             PopMatrix()
 
-
     def strokeText(self, text: str, x: float, y: float, max_width: float = None) -> None:
-        y = -y
         label = CoreLabel(
             text=text,
             font_size=self.font_size,
@@ -972,22 +935,26 @@ class Canvas2DContext(Widget):
         offsets = []
         for dx in range(-radius, radius+1):
             for dy in range(-radius, radius+1):
-                if dx*dx + dy*dy <= radius*radius:
+                if dx * dx + dy * dy <= radius * radius:
                     offsets.append((dx, dy))
 
         with self.canvas:
             PushMatrix()
             self._applyMatrix()
             self._beginClip()
+
             Color(*self._apply_global_alpha(self.strokeStyle))
+
             for dx, dy in offsets:
                 scaled_dx = dx * scale_factor
                 scaled_dy = dy * scale_factor
                 Rectangle(
                     pos=(pos[0] + scaled_dx, pos[1] + scaled_dy),
                     size=size,
-                    texture=texture
+                    texture=texture,
+                    tex_coords=(0, 0, 1, 0, 1, 1, 0, 1)
                 )
+            
             self._endClip()
             PopMatrix()
 
@@ -1025,35 +992,38 @@ class Canvas2DContext(Widget):
         with self.canvas:
             PushMatrix()
             self._applyMatrix()
+
+            self._beginClip()
+            Color(*self._apply_global_alpha(self.fillStyle))
             
             if self._current_path._shape_cache.get('round_rect'):
                 params = self._current_path._shape_cache['round_rect']['params']
-                Scale(x = 1,y = -1, origin = params['pos'])
+
+                Scale(x = 1, y = -1, z = 1, origin=params['pos'])
                 Translate(x = 0, y = -params['size'][1])
-                self._beginClip()
-                Color(*self._apply_global_alpha(self.fillStyle))
+
                 RoundedRectangle(
                     pos=params['pos'],
                     size=params['size'],
                     radius=params['radius']
                 )
-                self._endClip()
-                PopMatrix()
-                return
 
-            self._beginClip()
-            Color(*self._apply_global_alpha(self.fillStyle))
-            for subpath in path.subpaths:
-                if len(subpath) >= 3:
-                    vertices = []
-                    for point in subpath:
-                        x, y = point
-                        vertices.extend([x, y, 0, 0])
-                    Mesh(
-                        vertices=vertices,
-                        indices=list(range(len(subpath))),
-                        mode='triangle_fan'
-                    )
+            else:
+                for subpath in path.subpaths:
+                    if len(subpath) >= 3:
+                        vertices = []
+
+                        for point in subpath:
+                            x, y = point
+                            vertices.extend([x, y, 0, 0])
+                        
+                        Mesh(
+                            vertices=vertices,
+                            indices=list(range(len(subpath))),
+                            mode='triangle_fan',
+                            tex_coords=(0, 1, 1, 1, 1, 0, 0, 0)
+                        )
+                
             self._endClip()
             PopMatrix()
 
@@ -1061,12 +1031,17 @@ class Canvas2DContext(Widget):
         with self.canvas:
             PushMatrix()
             self._applyMatrix()
+
+            self._beginClip()
+            Color(*self._apply_global_alpha(self.strokeStyle))
+
+
             if self._current_path._shape_cache.get('round_rect'):
                 params = self._current_path._shape_cache['round_rect']['params']
-                Scale(x=1, y=-1, origin = params['pos'])
+
+                Scale(x = 1, y = -1, z = 1, origin=params['pos'])
                 Translate(x = 0, y = -params['size'][1])
-                self._beginClip()
-                Color(*self._apply_global_alpha(self.strokeStyle))
+
                 Line(
                     rounded_rectangle=(
                         params['pos'][0], 
@@ -1075,20 +1050,22 @@ class Canvas2DContext(Widget):
                         params['size'][1],
                         *params['radius']
                     ),
-                    width=self.lineWidth
+                    width=self.lineWidth,
                 )
-                self._endClip()
-                PopMatrix()
-                return
             
-            self._beginClip()
-            Color(*self._apply_global_alpha(self.strokeStyle))
-            for subpath in self._current_path.subpaths:
-                if len(subpath) >= 2:
-                    points = []
-                    for point in subpath:
-                        points.extend(point)
-                    Line(points=points, width=self.lineWidth)
+            else:
+                for subpath in self._current_path.subpaths:
+                    if len(subpath) >= 2:
+                        points = []
+
+                        for point in subpath:
+                            points.extend(point)
+
+                        Line(
+                            points=points, 
+                            width=self.lineWidth
+                        )
+            
             self._endClip()
             PopMatrix()
 
@@ -1098,65 +1075,47 @@ class Canvas2DContext(Widget):
         self._clip_fill_rule = fill_rule
 
     def rotate(self, angle):
-        self._rotation += -angle / math.pi * 180
+        self._combined_matrix.rotate(
+            angle = angle,
+            x = 0,
+            y = 0,
+            z = 0
+        )
 
     def scale(self, sx, sy):
-        self._scale_x *= sx
-        self._scale_y *= sy
+        self._combined_matrix.scale(
+            x = sx,
+            y = sy,
+            z = 0
+        )
 
     def translate(self, tx, ty):
-        self._translate_x += tx
-        self._translate_y += -ty
+        self._combined_matrix.translate(
+            x = tx,
+            y = ty,
+            z = 0
+        )
 
     def transform(self, a, b, c, d, e, f):
-        current_scale_x = self._scale_x
-        current_scale_y = self._scale_y
-        current_rotation = math.radians(self._rotation)
-        current_translate_x = self._translate_x
-        current_translate_y = self._translate_y
-
-        cos_theta = math.cos(current_rotation)
-        sin_theta = math.sin(current_rotation)
-        current_matrix = [
-            current_scale_x * cos_theta,
-            current_scale_x * sin_theta,
-            -current_scale_y * sin_theta,
-            current_scale_y * cos_theta,
-            current_translate_x,
-            current_translate_y
-        ]
-
-        new_matrix = [a, b, c, d, e, f]
-
-        combined_matrix = [
-            current_matrix[0] * new_matrix[0] + current_matrix[1] * new_matrix[2],
-            current_matrix[0] * new_matrix[1] + current_matrix[1] * new_matrix[3],
-            current_matrix[2] * new_matrix[0] + current_matrix[3] * new_matrix[2],
-            current_matrix[2] * new_matrix[1] + current_matrix[3] * new_matrix[3],
-            current_matrix[0] * new_matrix[4] + current_matrix[1] * new_matrix[5] + current_matrix[4],
-            current_matrix[2] * new_matrix[4] + current_matrix[3] * new_matrix[5] + current_matrix[5]
-        ]
-
-        self._scale_x = math.sqrt(combined_matrix[0] ** 2 + combined_matrix[1] ** 2)
-        self._scale_y = math.sqrt(combined_matrix[2] ** 2 + combined_matrix[3] ** 2)
-
-        self._rotation = math.degrees(math.atan2(combined_matrix[1], combined_matrix[0]))
-
-        self._translate_x = combined_matrix[4]
-        self._translate_y = combined_matrix[5]
-
-        self._combined_matrix = combined_matrix
+        new_matrix = Matrix()
+        new_matrix.set(array=[
+            [a, b, 0, 0],
+            [c, d, 0, 0],
+            [0, 0, 1, 0],
+            [e, f, 0, 1],
+        ])
+        self._combined_matrix = self._combined_matrix.multiply(new_matrix)
 
     def setTransform(self, a, b, c, d, e, f):
-        self._combined_matrix = [a, b, c, d, e, f]
+        self._combined_matrix.set(array=[
+            [a, b, 0, 0],
+            [c, d, 0, 0],
+            [0, 0, 1, 0],
+            [e, f, 0, 1],
+        ])
     
     def resetTransform(self):
-        self._rotation = 0
-        self._scale_x = 1
-        self._scale_y = 1
-        self._translate_x = 0
-        self._translate_y = 0
-        self._combined_matrix = None
+        self._combined_matrix.identity()
 
     def loadTexture(self, image):
         if isinstance(image, str):
@@ -1205,17 +1164,20 @@ class Canvas2DContext(Widget):
         with self.canvas:
             PushMatrix()
             self._applyMatrix()
-            pos=(dx, -dy)
-            size = (dw, -dh) if dh else (sw, -sh)
-            Scale(x = 1,y = -1, origin = pos)
-            Translate(x=0, y=-size[1])
+
+            pos = (dx, dy)
+            size = (dw, dh) if dh else (sw, sh)
+
             self._beginClip()
             Color(1, 1, 1, self._globalAlpha)
+
             Rectangle(
                 texture=source_region,
                 pos=pos,
-                size=size
+                size=size,
+                tex_coords=(0, 0, 1, 0, 1, 1, 0, 1)
             )
+
             self._endClip()
             PopMatrix()
 
@@ -1229,14 +1191,10 @@ class Canvas2DContext(Widget):
             'text_baseline': self._text_baseline,
             'clip_path': copy.deepcopy(self._clip_path),
             'clip_fill_rule': self._clip_fill_rule,
-            'scale_x': self._scale_x,
-            'scale_y': self._scale_y,
-            'rotation': self._rotation,
-            'translate_x': self._translate_x,
-            'translate_y': self._translate_y,
             'current_path': copy.deepcopy(self._current_path),
             'filter': self._filter,
-            'global_alpha': self.globalAlpha
+            'global_alpha': self.globalAlpha,
+            'combined_matrix': copy.deepcopy(self._combined_matrix),
         }
         self._state_stack.append(state)
 
@@ -1250,17 +1208,12 @@ class Canvas2DContext(Widget):
         self._text_baseline = state['text_baseline']
         self._clip_path = state['clip_path']
         self._clip_fill_rule = state['clip_fill_rule']
-        self._scale_x = state['scale_x']
-        self._scale_y = state['scale_y']
-        self._rotation = state['rotation']
-        self._translate_x = state['translate_x']
-        self._translate_y = state['translate_y']
         self._current_path = copy.deepcopy(state['current_path'])
         self._filter = state['filter']
         self.globalAlpha = state['global_alpha']
+        self._combined_matrix = state['combined_matrix']
 
     def regFont(self, name: str, path: str) -> None:
-        #注册字体
         LabelBase.register(
             name=name,
             fn_regular=path
@@ -1284,14 +1237,10 @@ if __name__ == '__main__':
                 ctx.reset()
 
                 ctx.font = '40px Phigros'
-                ctx.fillStyle = 'red'
-
-                ctx.beginPath()
-                ctx.rect(50, 700, 200, 150)
-                ctx.clip()
-
-                ctx.fillRect(50, 50, 800, 800)
                 
+                ctx.setTransform(1, 0.2, 0.8, 1, 0, 0)
+                #ctx.fillRect(0, 0, 100, 100)
+                ctx.fillText('Hello World', 0, 0)
             time.sleep(1 / 60)
 
     Thread(target = draw, daemon = True).start()
