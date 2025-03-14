@@ -10,13 +10,11 @@ from kivy.graphics.stencil_instructions import StencilPush, StencilPop, StencilU
 from kivy.graphics import (
     RoundedRectangle, Color, Rectangle, Line,
     Mesh, PushMatrix, PopMatrix,
-    Rotate, Scale, Translate, MatrixInstruction
+    Scale, Translate, MatrixInstruction
 )
 
 import re
-import math
 import copy
-import numpy as np
 from threading import Thread
 from functools import wraps
 
@@ -1238,9 +1236,7 @@ if __name__ == '__main__':
 
                 ctx.font = '40px Phigros'
                 
-                ctx.setTransform(1, 0.2, 0.8, 1, 0, 0)
-                #ctx.fillRect(0, 0, 100, 100)
-                ctx.fillText('Hello World', 0, 0)
+                
             time.sleep(1 / 60)
 
     Thread(target = draw, daemon = True).start()
