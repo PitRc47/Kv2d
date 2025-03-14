@@ -1,10 +1,10 @@
 from kivy.app import App
+from kivy.uix.widget import Widget
+from kivy.graphics.transformation import Matrix
 from kivy.core.window import Window
 from kivy.core.text import Label as CoreLabel, LabelBase
 from kivy.core.image import Image as CoreImage
 from kivy.clock import Clock
-from kivy.uix.widget import Widget
-from kivy.graphics.transformation import Matrix
 from kivy.graphics.texture import Texture
 from kivy.graphics.stencil_instructions import StencilPush, StencilPop, StencilUse
 from kivy.graphics import (
@@ -15,7 +15,6 @@ from kivy.graphics import (
 
 import re
 import copy
-from threading import Thread
 from functools import wraps
 
 class CSSColorParser:
@@ -1218,6 +1217,9 @@ class Canvas2DContext(Widget):
         )
 
 if __name__ == '__main__':
+    from threading import Thread
+    import time
+    
     ctx = Canvas2DContext()
     class ctxApp(App):
         def build(self, **kwargs): return ctx
@@ -1225,17 +1227,13 @@ if __name__ == '__main__':
     app = ctxApp()
     
     def draw():
-        import time
         with ctx:
             #ico = ctx.loadTexture('Test/icon.ico')
             ctx.regFont('Phigros', 'Test/font.ttf')
         while True:
-            
             with ctx:
                 ctx.reset()
-
                 ctx.font = '40px Phigros'
-                
                 
             time.sleep(1 / 60)
 
