@@ -548,6 +548,11 @@ class Canvas2DContext(Widget):
             'globalAlpha'
         ]
 
+        self._needResultMethods = [
+            'measureText',
+            'loadTexture'
+        ]
+
         self._origMethodsList = {}
         self._warppedMethodsList = {}
         self._origPropertiesList = {}
@@ -674,9 +679,7 @@ class Canvas2DContext(Widget):
             self._drawInsts.append(
                 (original_func, (args, kwargs))
             )
-            if original_func.__name__ in [
-                'measureText', 'loadTexture'
-            ]:
+            if original_func.__name__ in self._needResultMethods:
                 self.endDraw()
                 self.beginDraw()
                 
