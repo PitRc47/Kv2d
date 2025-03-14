@@ -559,8 +559,6 @@ class Canvas2DContext(Widget):
 
         self.size = Window.size
 
-        self._patchAll()
-
     def __enter__(self):
         self.beginDraw()
         return self
@@ -732,7 +730,6 @@ class Canvas2DContext(Widget):
         for inst in self._drawInsts:
             mtd, args = inst
             self._lastFuncResult = mtd(*args[0], **args[1])
-        self._patchAll()
         self._lock = False
     
     def _apply_global_alpha(self, color):
@@ -776,6 +773,7 @@ class Canvas2DContext(Widget):
 
     def beginDraw(self):
         while self._lock: pass
+        self._patchAll()
         self._drawInsts = []
 
     def endDraw(self):
