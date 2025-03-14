@@ -408,11 +408,11 @@ class TextMetrics:
 
     @property
     def ideographicBaseline(self) -> float:
-        return self.font_height * 0.75
+        return self.font_height * 0.9
     
     @property
     def hangingBaseline(self):
-        return self.ascent * 0.25
+        return self.ascent * 0.2
 
     def _get_alignment_base_x(self):
         align = self._ctx.textAlign
@@ -852,7 +852,7 @@ class Canvas2DContext(Widget):
 
         match self.textBaseline:
             case 'top':
-                y_adjust = -metrics.ascent
+                y_adjust = 0  # 顶部对齐，无需调整
             case 'hanging':
                 y_adjust = -metrics.hangingBaseline
             case 'middle':
@@ -1233,15 +1233,24 @@ if __name__ == '__main__':
         while True:
             with ctx:
                 ctx.reset()
-                ctx.font = '40px Phigros'
+                ctx.font = '20px Phigros'
 
-                ctx.save()
-                ctx.fillStyle = 'green'
-                ctx.fillRect(10, 10, 100, 100)
+                ctx.strokeStyle = 'red'
 
-                ctx.restore()
+                ctx.beginPath()
+                ctx.moveTo(0, 100)
+                ctx.lineTo(840, 100)
+                ctx.moveTo(0, 55)
+                ctx.stroke()
 
-                ctx.fillRect(150, 40, 100, 100)
+                baselines = ['top', 'hanging', 'middle', 'alphabetic', 'ideographic', 'bottom']
+                for index, baseline in enumerate(baselines):
+                    ctx.save()
+                    ctx.textBaseline = baseline
+                    x = index * 120 + 10
+                    ctx.fillText("Abcdefghijk", x, 100)
+                    ctx.restore()
+                    ctx.fillText(baseline, x + 5, 50)
 
             time.sleep(1 / 60)
 
