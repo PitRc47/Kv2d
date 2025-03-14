@@ -1191,7 +1191,7 @@ class Canvas2DContext(Widget):
             'current_path': copy.deepcopy(self._current_path),
             'filter': self._filter,
             'global_alpha': self.globalAlpha,
-            'combined_matrix': copy.deepcopy(self._combined_matrix),
+            'combined_matrix': self._combined_matrix,
         }
         self._state_stack.append(state)
 
@@ -1234,7 +1234,15 @@ if __name__ == '__main__':
             with ctx:
                 ctx.reset()
                 ctx.font = '40px Phigros'
-                
+
+                ctx.save()
+                ctx.fillStyle = 'green'
+                ctx.fillRect(10, 10, 100, 100)
+
+                ctx.restore()
+
+                ctx.fillRect(150, 40, 100, 100)
+
             time.sleep(1 / 60)
 
     Thread(target = draw, daemon = True).start()
