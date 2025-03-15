@@ -13,8 +13,7 @@ from kivy.graphics import (
     Scale, Translate, MatrixInstruction
 )
 
-import re
-import copy
+import re, copy
 from functools import wraps
 
 class CSSColorParser:
@@ -347,9 +346,9 @@ class CSSFont:
 
     def apply_to_text(self, text_widget):
         if self.font_size:
-            text_widget.font_size = self.font_size
+            text_widget._font_size = self.font_size
         if self.font_family:
-            text_widget.font_name = self._get_kivy_font_name()
+            text_widget._font_name = self._get_kivy_font_name()
         self._apply_font_style(text_widget)
         self._apply_font_weight(text_widget)
 
@@ -428,26 +427,24 @@ class Path2D:
     def __init__(self, path=None):
         self.subpaths = []
         self.current_subpath = []
-        self._shape_cache = {}
+        self.exShape = []
         
-        if isinstance(path, (str, Path2D)):
-            self.parse_path(path)
         if isinstance(path, Path2D):
-            self.subpaths = [subpath.copy() for subpath in path.subpaths]
-            if self.subpaths:
-                self.current_subpath = self.subpaths[-1].copy()
+            self.subpaths = [sub.copy() for sub in path.subpaths]
+            self.current_subpath = self.subpaths[-1].copy() if self.subpaths else []
+            self.exShape = path.exShape.copy() if path.exShape else []
         elif isinstance(path, str):
             pass
         else:
             self.beginPath()
     
-    def to_list(self, r):
+    def _to_list(self, r):
         if isinstance(r, (int, float)):
             return [r, r]
         return list(r)[:2]
 
-    def normalize_radii(self, radii, width, height):
-        base = [self.to_list(r) for r in radii] if isinstance(radii, (list, tuple)) else [self.to_list(radii)]*4
+    def _normalize_radii(self, radii, width, height):
+        base = [self._to_list(r) for r in radii] if isinstance(radii, (list, tuple)) else [self._to_list(radii)]*4
         base += base*(4//len(base))
         
         if width < 0:
@@ -463,12 +460,6 @@ class Path2D:
             min(base[2][0], abs(width)/2), 
             min(base[3][0], abs(width)/2)
         ]
-
-    def parse_path(self, path):
-        if isinstance(path, Path2D):
-            self.subpaths = [sub.copy() for sub in path.subpaths]
-            self._shape_cache = copy.deepcopy(path._shape_cache)
-            self.current_subpath = self.subpaths[-1].copy() if self.subpaths else []
 
     def beginPath(self):
         self.subpaths = []
@@ -496,20 +487,21 @@ class Path2D:
         self.current_subpath = []
     
     def roundRect(self, x, y, w, h, radii):
-        self._shape_cache['round_rect'] = {
-            'x': x,
-            'y': y,
-            'w': w,
-            'h': h,
-            'radii': radii
-        }
-        normalized_radii = self.normalize_radii(radii, w, h)
-        
-        self._shape_cache['round_rect']['params'] = {
-            'pos': (x + min(0, w), y + min(0, h)),
-            'size': (abs(w), abs(h)),
-            'radius': normalized_radii
-        }
+        self.exShape.append(
+            {
+                'type': 'roundRect',
+                'x': x,
+                'y': y,
+                'w': w,
+                'h': h,
+                'radii': radii,
+                'params': {
+                    'pos': (x + min(0, w), y + min(0, h)),
+                    'size': (abs(w), abs(h)),
+                    'radius': self._normalize_radii(radii, w, h)
+                }
+            }
+        )
 
 class Canvas2DContext(Widget):
     def __init__(self, **kwargs):
@@ -527,7 +519,7 @@ class Canvas2DContext(Widget):
             'rect', 'roundRect', 'fill', 'stroke',
             'clip', 'rotate', 'scale', 'translate', 'transform',
             'setTransform', 'resetTransform', 'loadTexture',
-            'drawImage', 'save', 'restore', 'reset'
+            'drawImage', 'save', 'restore', 'reset', 'resize'
         ]
 
         self._propertiesPatchList = [
@@ -556,8 +548,6 @@ class Canvas2DContext(Widget):
         self.reset()
 
         self.bind(pos=self._update_rect, size=self._update_rect)
-
-        self.size = Window.size
 
     def __enter__(self):
         self.beginDraw()
@@ -598,8 +588,8 @@ class Canvas2DContext(Widget):
     def font(self, value):
         self._font = value
         css_font = CSSFont(value)
-        self.font_size = css_font.font_size
-        self.font_name = css_font._get_kivy_font_name()
+        self._font_size = css_font.font_size
+        self._font_name = css_font._get_kivy_font_name()
 
     @property
     def fillStyle(self):
@@ -642,8 +632,6 @@ class Canvas2DContext(Widget):
     def _update_rect(self, *args):
         self.___rect.pos = self.pos
         self.___rect.size = self.size
-        self._applyMatrix()
-        self.canvas.ask_update()
 
     def _patchAll(self):
         for method in self._methodsPatchList:
@@ -711,7 +699,9 @@ class Canvas2DContext(Widget):
     def _applyMatrix(self):
         Scale(x = 1, y = -1, z = 1)
         Translate(0, -self.height)
-        MatrixInstruction().matrix = self._combined_matrix
+        cloneMatrix = Matrix()
+        cloneMatrix.set(flat = self._combined_matrix.get())
+        MatrixInstruction().matrix = cloneMatrix
 
     def _exce_draw(self, *args, **kwargs):
         self._restoreAll()
@@ -729,7 +719,24 @@ class Canvas2DContext(Widget):
             StencilPush()
             
             Color(1, 1, 1, 1)
-            for subpath in self._clip_path:
+            for shape in self._clip_path.exShape:
+                shapeType = shape['type']
+                if shapeType == 'roundRect':
+                    params = shape['params']
+                    PushMatrix()
+
+                    Scale(x = 1, y = -1, z = 1, origin=params['pos'])
+                    Translate(x = 0, y = -params['size'][1])
+
+                    RoundedRectangle(
+                        pos=params['pos'],
+                        size=params['size'],
+                        radius=params['radius']
+                    )
+
+                    PopMatrix()
+            
+            for subpath in self._clip_path.subpaths:
                 if len(subpath) >= 3:
                     vertices = []
                     for point in subpath:
@@ -775,6 +782,8 @@ class Canvas2DContext(Widget):
         self._globalAlpha = 1
         self._current_path = Path2D()
         self._font = '10px sans-serif'
+        self._font_size = 10
+        self._font_name = 'sans-serif'
         
         self.canvas.clear()
 
@@ -794,7 +803,7 @@ class Canvas2DContext(Widget):
         with self.canvas:
             PushMatrix()
             self._applyMatrix()
-            
+
             self._beginClip()
             Color(*self._apply_global_alpha(self.fillStyle))
 
@@ -827,8 +836,8 @@ class Canvas2DContext(Widget):
     def fillText(self, text: str, x: float, y: float, max_width: float = None) -> None:
         label = CoreLabel(
             text=text, 
-            font_size=self.font_size, 
-            font_name=self.font_name.split(',')[0], 
+            font_size=self._font_size, 
+            font_name=self._font_name.split(',')[0], 
             valign='top'
         )
         label.refresh()
@@ -889,8 +898,8 @@ class Canvas2DContext(Widget):
     def strokeText(self, text: str, x: float, y: float, max_width: float = None) -> None:
         label = CoreLabel(
             text=text,
-            font_size=self.font_size,
-            font_name=self.font_name.split(',')[0],
+            font_size=self._font_size,
+            font_name=self._font_name.split(',')[0],
             valign='top'
         )
         label.refresh()
@@ -909,8 +918,8 @@ class Canvas2DContext(Widget):
         elif self.textAlign == 'right':
             x -= text_width * scale_factor
 
-        ascent = self.font_size * 0.8
-        descent = self.font_size * 0.2
+        ascent = self._font_size * 0.8
+        descent = self._font_size * 0.2
         total_height = ascent + descent
 
         match self.textBaseline:
@@ -958,8 +967,8 @@ class Canvas2DContext(Widget):
     def measureText(self, text: str) -> dict:
         label = CoreLabel(
             text=text,
-            font_size=self.font_size,
-            font_name=self.font_name.split(',')[0],
+            font_size=self._font_size,
+            font_name=self._font_name.split(',')[0],
             valign='top'
         )
         label.refresh()
@@ -993,33 +1002,34 @@ class Canvas2DContext(Widget):
             self._beginClip()
             Color(*self._apply_global_alpha(self.fillStyle))
             
-            if self._current_path._shape_cache.get('round_rect'):
-                params = self._current_path._shape_cache['round_rect']['params']
+            for shape in self._current_path.exShape:
+                shapeType = shape['type']
+                if shapeType == 'roundRect':
+                    params = shape['params']
 
-                Scale(x = 1, y = -1, z = 1, origin=params['pos'])
-                Translate(x = 0, y = -params['size'][1])
+                    Scale(x = 1, y = -1, z = 1, origin=params['pos'])
+                    Translate(x = 0, y = -params['size'][1])
 
-                RoundedRectangle(
-                    pos=params['pos'],
-                    size=params['size'],
-                    radius=params['radius']
-                )
+                    RoundedRectangle(
+                        pos=params['pos'],
+                        size=params['size'],
+                        radius=params['radius']
+                    )
 
-            else:
-                for subpath in path.subpaths:
-                    if len(subpath) >= 3:
-                        vertices = []
+            for subpath in path.subpaths:
+                if len(subpath) >= 3:
+                    vertices = []
 
-                        for point in subpath:
-                            x, y = point
-                            vertices.extend([x, y, 0, 0])
-                        
-                        Mesh(
-                            vertices=vertices,
-                            indices=list(range(len(subpath))),
-                            mode='triangle_fan',
-                            tex_coords=(0, 1, 1, 1, 1, 0, 0, 0)
-                        )
+                    for point in subpath:
+                        x, y = point
+                        vertices.extend([x, y, 0, 0])
+                    
+                    Mesh(
+                        vertices=vertices,
+                        indices=list(range(len(subpath))),
+                        mode='triangle_fan',
+                        tex_coords=(0, 1, 1, 1, 1, 0, 0, 0)
+                    )
                 
             self._endClip()
             PopMatrix()
@@ -1032,43 +1042,43 @@ class Canvas2DContext(Widget):
             self._beginClip()
             Color(*self._apply_global_alpha(self.strokeStyle))
 
+            for shape in self._current_path.exShape:
+                shapeType = shape['type']
+                if shapeType == 'roundRect':
+                    params = shape['params']
 
-            if self._current_path._shape_cache.get('round_rect'):
-                params = self._current_path._shape_cache['round_rect']['params']
+                    Scale(x = 1, y = -1, z = 1, origin=params['pos'])
+                    Translate(x = 0, y = -params['size'][1])
 
-                Scale(x = 1, y = -1, z = 1, origin=params['pos'])
-                Translate(x = 0, y = -params['size'][1])
-
-                Line(
-                    rounded_rectangle=(
-                        params['pos'][0], 
-                        params['pos'][1], 
-                        params['size'][0], 
-                        params['size'][1],
-                        *params['radius']
-                    ),
-                    width=self.lineWidth,
-                )
+                    Line(
+                        rounded_rectangle=(
+                            params['pos'][0], 
+                            params['pos'][1], 
+                            params['size'][0], 
+                            params['size'][1],
+                            *params['radius']
+                        ),
+                        width=self.lineWidth,
+                    )
             
-            else:
-                for subpath in self._current_path.subpaths:
-                    if len(subpath) >= 2:
-                        points = []
+            for subpath in self._current_path.subpaths:
+                if len(subpath) >= 2:
+                    points = []
 
-                        for point in subpath:
-                            points.extend(point)
+                    for point in subpath:
+                        points.extend(point)
 
-                        Line(
-                            points=points, 
-                            width=self.lineWidth
-                        )
+                    Line(
+                        points=points, 
+                        width=self.lineWidth
+                    )
             
             self._endClip()
             PopMatrix()
 
     def clip(self, path=None, fill_rule: str = 'nonzero') -> None:
         path = path or self._current_path
-        self._clip_path = path.subpaths
+        self._clip_path = path
         self._clip_fill_rule = fill_rule
 
     def rotate(self, angle):
@@ -1076,7 +1086,7 @@ class Canvas2DContext(Widget):
             angle = angle,
             x = 0,
             y = 0,
-            z = 0
+            z = 1
         )
 
     def scale(self, sx, sy):
@@ -1209,6 +1219,11 @@ class Canvas2DContext(Widget):
         self._filter = state['filter']
         self.globalAlpha = state['global_alpha']
         self._combined_matrix = state['combined_matrix']
+    
+    def resize(self, width: int, height: int) -> None:
+        self.width = width
+        self.height = height
+        self.size = (width, height)
 
     def regFont(self, name: str, path: str) -> None:
         LabelBase.register(
@@ -1218,7 +1233,7 @@ class Canvas2DContext(Widget):
 
 if __name__ == '__main__':
     from threading import Thread
-    import time
+    import time, math
     
     ctx = Canvas2DContext()
     class ctxApp(App):
@@ -1233,24 +1248,19 @@ if __name__ == '__main__':
         while True:
             with ctx:
                 ctx.reset()
+                ctx.resize(100, 100)
                 ctx.font = '20px Phigros'
-
-                ctx.strokeStyle = 'red'
-
+                
+                ctx.strokeStyle = "magenta"
+                ctx.lineWidth = 2
                 ctx.beginPath()
-                ctx.moveTo(0, 100)
-                ctx.lineTo(840, 100)
-                ctx.moveTo(0, 55)
-                ctx.stroke()
+                ctx.roundRect(400, 150, -200, 100, [0, 30, 50, 60])
+                ctx.clip()
 
-                baselines = ['top', 'hanging', 'middle', 'alphabetic', 'ideographic', 'bottom']
-                for index, baseline in enumerate(baselines):
-                    ctx.save()
-                    ctx.textBaseline = baseline
-                    x = index * 120 + 10
-                    ctx.fillText("Abcdefghijk", x, 100)
-                    ctx.restore()
-                    ctx.fillText(baseline, x + 5, 50)
+                ctx.strokeStyle = "red"
+                ctx.beginPath()
+                ctx.roundRect(280, 170, 150, 100, [40])
+                ctx.stroke()
 
             time.sleep(1 / 60)
 
