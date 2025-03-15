@@ -8,9 +8,7 @@ from kivy.clock import Clock
 from kivy.graphics.fbo import Fbo
 from kivy.graphics.texture import Texture
 from kivy.graphics.stencil_instructions import StencilPush, StencilPop, StencilUse
-from kivy.graphics.opengl import (glReadPixels, 
-    glFinish, glFlush, GL_RGBA, GL_UNSIGNED_BYTE
-)
+from kivy.graphics.opengl import glReadPixels, GL_RGBA, GL_UNSIGNED_BYTE
 from kivy.graphics import (
     RoundedRectangle, Color, Rectangle, Line, ClearColor,
     Mesh, PushMatrix, PopMatrix, ClearBuffers,
