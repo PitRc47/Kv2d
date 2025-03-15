@@ -5,11 +5,15 @@ from kivy.core.window import Window
 from kivy.core.text import Label as CoreLabel, LabelBase
 from kivy.core.image import Image as CoreImage
 from kivy.clock import Clock
+from kivy.graphics.fbo import Fbo
 from kivy.graphics.texture import Texture
 from kivy.graphics.stencil_instructions import StencilPush, StencilPop, StencilUse
+from kivy.graphics.opengl import (glReadPixels, 
+    glFinish, glFlush, GL_RGBA, GL_UNSIGNED_BYTE
+)
 from kivy.graphics import (
-    RoundedRectangle, Color, Rectangle, Line,
-    Mesh, PushMatrix, PopMatrix,
+    RoundedRectangle, Color, Rectangle, Line, ClearColor,
+    Mesh, PushMatrix, PopMatrix, ClearBuffers,
     Scale, Translate, MatrixInstruction
 )
 
@@ -503,6 +507,14 @@ class Path2D:
             }
         )
 
+class ImageData:
+    def __init__(self, width, height, data):
+        self.width = width
+        self.height = height
+        self.data = bytes(data)
+        self.texture = Texture.create(size=(width, height), colorfmt='rgba')
+        self.texture.blit_buffer(self.data, colorfmt='rgba', bufferfmt='ubyte')
+
 class Canvas2DContext(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -514,9 +526,9 @@ class Canvas2DContext(Widget):
 
         self._methodsPatchList = [
             'fillText', 'strokeText', 'measureText',
-            'clearRect', 'fillRect', 'strokeRect',
+            'clearRect', 'fillRect', 'strokeRect', 'putImageData',
             'beginPath', 'closePath', 'moveTo', 'lineTo',
-            'rect', 'roundRect', 'fill', 'stroke',
+            'rect', 'roundRect', 'fill', 'stroke', 'getImageData',
             'clip', 'rotate', 'scale', 'translate', 'transform',
             'setTransform', 'resetTransform', 'loadTexture',
             'drawImage', 'save', 'restore', 'reset', 'resize'
@@ -530,12 +542,14 @@ class Canvas2DContext(Widget):
             'textAlign', 
             'textBaseline',
             'filter',
-            'globalAlpha'
+            'globalAlpha',
+            'imageSmoothingEnabled'
         ]
 
         self._needResultMethods = [
             'measureText',
-            'loadTexture'
+            'loadTexture',
+            'getImageData'
         ]
 
         self._origMethodsList = {}
@@ -544,6 +558,8 @@ class Canvas2DContext(Widget):
         self._wrappedPropertiesList = {}
 
         self._combined_matrix = Matrix()
+
+        self._fbo = None
 
         self.reset()
 
@@ -628,6 +644,14 @@ class Canvas2DContext(Widget):
     @globalAlpha.setter
     def globalAlpha(self, value: float) -> None:
         self._globalAlpha = max(0.0, min(1.0, value))
+
+    @property
+    def imageSmoothingEnabled(self) -> bool:
+        return self._imageSmoothingEnabled
+
+    @imageSmoothingEnabled.setter
+    def imageSmoothingEnabled(self, value: bool) -> None:
+        self._imageSmoothingEnabled = value
 
     def _update_rect(self, *args):
         self.___rect.pos = self.pos
@@ -784,6 +808,7 @@ class Canvas2DContext(Widget):
         self._font = '10px sans-serif'
         self._font_size = 10
         self._font_name = 'sans-serif'
+        self._imageSmoothingEnabled = True
         
         self.canvas.clear()
 
@@ -874,6 +899,10 @@ class Canvas2DContext(Widget):
                 y_adjust = -font_height
             case _:
                 y_adjust = -metrics.alphabeticBaseline
+        
+        if not self._imageSmoothingEnabled:
+            texture.min_filter = 'nearest'
+            texture.mag_filter = 'nearest'
             
         with self.canvas:
             PushMatrix()
@@ -943,6 +972,10 @@ class Canvas2DContext(Widget):
             for dy in range(-radius, radius+1):
                 if dx * dx + dy * dy <= radius * radius:
                     offsets.append((dx, dy))
+        
+        if not self._imageSmoothingEnabled:
+            texture.min_filter = 'nearest'
+            texture.mag_filter = 'nearest'
 
         with self.canvas:
             PushMatrix()
@@ -1135,13 +1168,6 @@ class Canvas2DContext(Widget):
         raise TypeError("Unsupported image type")
     
     def drawImage(self, image, *args):
-        """
-        支持三种重载形式：
-        1. drawImage(image, dx, dy)
-        2. drawImage(image, dx, dy, dWidth, dHeight)
-        3. drawImage(image, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight)
-        """
-
         match len(args):
             case 2:
                 dx, dy = args
@@ -1154,37 +1180,44 @@ class Canvas2DContext(Widget):
                 sx, sy, sw, sh, dx, dy, dw, dh = args
                 source_rect = (sx, sy, sw, sh)
             case _:
-                raise ValueError("Invalid arguments. Expected 2, 4 or 8 parameters")
-        
+                raise ValueError("Expected 2, 4 or 8 parameters")
+
         texture = self.loadTexture(image)
-        
+
         if source_rect:
             sx, sy, sw, sh = source_rect
+            sx = max(0, min(sx, texture.width))
+            sy = max(0, min(sy, texture.height))
+            sw = max(0, min(sw, texture.width - sx))
+            sh = max(0, min(sh, texture.height - sy))
+            if sw <= 0 or sh <= 0:
+                return
             sy_adj = texture.height - (sy + sh)
             source_region = texture.get_region(sx, sy_adj, sw, sh)
         else:
-            sw, sh = texture.width, texture.height
+            sw, sh = texture.size
             source_region = texture
             if len(args) == 2:
                 dw, dh = sw, sh
+        
+        if not self._imageSmoothingEnabled:
+            source_region.min_filter = 'nearest'
+            source_region.mag_filter = 'nearest'
+
+        if dw is not None and dh is not None and (dw <= 0 or dh <= 0):
+            return
 
         with self.canvas:
             PushMatrix()
             self._applyMatrix()
-
-            pos = (dx, dy)
-            size = (dw, dh) if dh else (sw, sh)
-
             self._beginClip()
-            Color(1, 1, 1, self._globalAlpha)
-
+            Color(1, 1, 1, self.globalAlpha)
             Rectangle(
                 texture=source_region,
-                pos=pos,
-                size=size,
+                pos=(dx, dy),
+                size=(dw or sw, dh or sh),
                 tex_coords=(0, 0, 1, 0, 1, 1, 0, 1)
             )
-
             self._endClip()
             PopMatrix()
 
@@ -1200,8 +1233,9 @@ class Canvas2DContext(Widget):
             'clip_fill_rule': self._clip_fill_rule,
             'current_path': copy.deepcopy(self._current_path),
             'filter': self._filter,
-            'global_alpha': self.globalAlpha,
+            'global_alpha': self._globalAlpha,
             'combined_matrix': self._combined_matrix,
+            'image_smoothing_enabled': self._imageSmoothingEnabled,
         }
         self._state_stack.append(state)
 
@@ -1210,15 +1244,16 @@ class Canvas2DContext(Widget):
         self._fill_style = state['fill_style']
         self._stroke_style = state['stroke_style']
         self._line_width = state['line_width']
-        self.font = state['font']
+        self._font = state['font']
         self._text_align = state['text_align']
         self._text_baseline = state['text_baseline']
         self._clip_path = state['clip_path']
         self._clip_fill_rule = state['clip_fill_rule']
         self._current_path = copy.deepcopy(state['current_path'])
         self._filter = state['filter']
-        self.globalAlpha = state['global_alpha']
+        self._globalAlpha = state['global_alpha']
         self._combined_matrix = state['combined_matrix']
+        self._imageSmoothingEnabled = state['image_smoothing_enabled']
     
     def resize(self, width: int, height: int) -> None:
         self.width = width
@@ -1230,6 +1265,81 @@ class Canvas2DContext(Widget):
             name=name,
             fn_regular=path
         )
+    
+    def getImageData(self, x, y, width, height):
+        x = max(0, min(x, self.width))
+        y = max(0, min(y, self.height))
+        width = max(0, min(width, self.width - x))
+        height = max(0, min(height, self.height - y))
+        
+        if width == 0 or height == 0:
+            return ImageData(0, 0, b'')
+
+        if self._fbo is None or self._fbo.size != self.size:
+            self._fbo = Fbo(size=self.size, clear_color=(0, 0, 0, 0))
+        
+        with self._fbo:
+            ClearColor(1, 1, 1, 1)
+            ClearBuffers()
+            for instr in self.canvas.children:
+                self._fbo.add(instr)
+        self._fbo.draw()
+
+        pixels = glReadPixels(
+            x, 
+            self.height - y - height,
+            width, 
+            height, 
+            GL_RGBA, 
+            GL_UNSIGNED_BYTE
+        )
+
+        self._fbo.clear()
+        
+        return ImageData(
+            width,
+            height, 
+            pixels
+        )
+    
+    def putImageData(self, image_data, dx, dy, dirty_x=0, dirty_y=0, dirty_width=None, dirty_height=None):
+        img_width = image_data.width
+        img_height = image_data.height
+
+        sx = max(0, min(int(dirty_x), img_width))
+        sy = max(0, min(int(dirty_y), img_height))
+        
+        dirty_width = img_width - sx if dirty_width is None else max(0, int(dirty_width))
+        sw = max(0, min(dirty_width, img_width - sx))
+        
+        dirty_height = img_height - sy if dirty_height is None else max(0, int(dirty_height))
+        sh = max(0, min(dirty_height, img_height - sy))
+
+        if sw == 0 or sh == 0:
+            return
+
+        if not self._imageSmoothingEnabled:
+            image_data.texture.min_filter = 'nearest'
+            image_data.texture.mag_filter = 'nearest'
+        
+        with self.canvas:
+            PushMatrix()
+            self._applyMatrix()
+            self._beginClip()
+            
+            Scale(x = 1, y = -1, z = 1, origin=(dx, dy))
+            Translate(x = 0, y = -sh)
+
+            Color(1, 1, 1, self.globalAlpha)
+            Rectangle(
+                texture=image_data.texture,
+                pos=(dx, dy),
+                size=(sw, sh),
+            )
+
+            self._endClip()
+            PopMatrix()
+        
 
 if __name__ == '__main__':
     from threading import Thread
@@ -1243,25 +1353,19 @@ if __name__ == '__main__':
     
     def draw():
         with ctx:
-            #ico = ctx.loadTexture('Test/icon.ico')
+            ico = ctx.loadTexture('Test/icon.ico')
             ctx.regFont('Phigros', 'Test/font.ttf')
         while True:
             with ctx:
                 ctx.reset()
-                ctx.resize(100, 100)
                 ctx.font = '20px Phigros'
                 
-                ctx.strokeStyle = "magenta"
-                ctx.lineWidth = 2
-                ctx.beginPath()
-                ctx.roundRect(400, 150, -200, 100, [0, 30, 50, 60])
-                ctx.clip()
+                ctx.drawImage(ico, 0, 0, 233, 320)
 
-                ctx.strokeStyle = "red"
-                ctx.beginPath()
-                ctx.roundRect(280, 170, 150, 100, [40])
-                ctx.stroke()
-
+                imageData = ctx.getImageData(10, 20, 80, 230)
+                ctx.putImageData(imageData, 260, 0)
+                ctx.putImageData(imageData, 380, 50)
+                ctx.putImageData(imageData, 500, 100)
             time.sleep(1 / 60)
 
     Thread(target = draw, daemon = True).start()
