@@ -1,6 +1,7 @@
 from kivy.app import App
 from kivy.uix.widget import Widget
 from kivy.graphics.transformation import Matrix
+from kivy.core.window import Window
 from kivy.core.text import Label as CoreLabel, LabelBase
 from kivy.core.image import Image as CoreImage
 from kivy.clock import Clock
@@ -11,11 +12,10 @@ from kivy.graphics.opengl import glReadPixels, GL_RGBA, GL_UNSIGNED_BYTE
 from kivy.graphics import (
     RoundedRectangle, Color, Rectangle, Line, ClearColor,
     Mesh, PushMatrix, PopMatrix, ClearBuffers,
-    Scale, Translate, MatrixInstruction, RenderContext
+    Scale, Translate, MatrixInstruction
 )
 
 import re, copy
-import numpy as np
 from functools import wraps
 
 class CSSColorParser:
@@ -513,9 +513,6 @@ class ImageData:
         self.texture = Texture.create(size=(width, height), colorfmt='rgba')
         self.texture.blit_buffer(self.data, colorfmt='rgba', bufferfmt='ubyte')
 
-class LinearGradient:
-    pass
-
 class Canvas2DContext(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -532,8 +529,7 @@ class Canvas2DContext(Widget):
             'rect', 'roundRect', 'fill', 'stroke', 'getImageData',
             'clip', 'rotate', 'scale', 'translate', 'transform',
             'setTransform', 'resetTransform', 'loadTexture',
-            'drawImage', 'save', 'restore', 'reset', 'resize',
-            'createLinearGradient'
+            'drawImage', 'save', 'restore', 'reset', 'resize'
         ]
 
         self._propertiesPatchList = [
@@ -551,8 +547,7 @@ class Canvas2DContext(Widget):
         self._needResultMethods = [
             'measureText',
             'loadTexture',
-            'getImageData',
-            'createLinearGradient'
+            'getImageData'
         ]
 
         self._origMethodsList = {}
@@ -616,9 +611,7 @@ class Canvas2DContext(Widget):
     
     @fillStyle.setter
     def fillStyle(self, color_str):
-        if isinstance(color_str, LinearGradient):
-            self._fill_style = color_str
-        elif isinstance(color_str, tuple):
+        if isinstance(color_str, tuple):
             self._fill_style = color_str
         else:
             self._fill_style = CSSColorParser.parse_color(color_str)
@@ -629,9 +622,7 @@ class Canvas2DContext(Widget):
     
     @strokeStyle.setter
     def strokeStyle(self, color_str):
-        if isinstance(color_str, LinearGradient):
-            self._fill_style = color_str
-        elif isinstance(color_str, tuple):
+        if isinstance(color_str, tuple):
             self._stroke_style = color_str
         else:
             self._stroke_style = CSSColorParser.parse_color(color_str)
@@ -744,7 +735,6 @@ class Canvas2DContext(Widget):
     def _apply_global_alpha(self, color):
         r, g, b, a = color
         return (r, g, b, a * self._globalAlpha)
-
     
     def _beginClip(self):
         if self._clip_path:
@@ -839,6 +829,7 @@ class Canvas2DContext(Widget):
 
             self._beginClip()
             Color(*self._apply_global_alpha(self.fillStyle))
+
             Rectangle(
                 pos=(x, y),
                 size=(width, height),
@@ -920,6 +911,7 @@ class Canvas2DContext(Widget):
 
             self._beginClip()
             Color(*self._apply_global_alpha(self.fillStyle))
+
             Rectangle(
                 pos=pos,
                 size=size,
@@ -989,6 +981,7 @@ class Canvas2DContext(Widget):
             self._beginClip()
 
             Color(*self._apply_global_alpha(self.strokeStyle))
+
             for dx, dy in offsets:
                 scaled_dx = dx * scale_factor
                 scaled_dy = dy * scale_factor
@@ -1038,15 +1031,13 @@ class Canvas2DContext(Widget):
             self._applyMatrix()
 
             self._beginClip()
-            Color(*self._apply_global_alpha(self.fillStyle))            
-            # 处理形状
+            Color(*self._apply_global_alpha(self.fillStyle))
+            
             for shape in self._current_path.exShape:
                 shapeType = shape['type']
                 if shapeType == 'roundRect':
                     params = shape['params']
-                    
-                    Color(*self._apply_global_alpha(self.fillStyle))
-                        
+
                     Scale(x = 1, y = -1, z = 1, origin=params['pos'])
                     Translate(x = 0, y = -params['size'][1])
 
@@ -1056,14 +1047,13 @@ class Canvas2DContext(Widget):
                         radius=params['radius']
                     )
 
-            # 处理子路径
             for subpath in path.subpaths:
                 if len(subpath) >= 3:
                     vertices = []
+
                     for point in subpath:
                         x, y = point
                         vertices.extend([x, y, 0, 0])
-                    
                     
                     Mesh(
                         vertices=vertices,
@@ -1173,7 +1163,7 @@ class Canvas2DContext(Widget):
             return image
         if hasattr(image, "texture"):
             return image.texture
-        raise TypeError("Unsupported image type", type(image))
+        raise TypeError("Unsupported image type")
     
     def drawImage(self, image, *args):
         match len(args):
@@ -1347,9 +1337,6 @@ class Canvas2DContext(Widget):
 
             self._endClip()
             PopMatrix()
-    
-    def createLinearGradient(self, x0: float, y0: float, x1: float, y1: float):
-        return LinearGradient(x0, y0, x1, y1)
         
 
 if __name__ == '__main__':
@@ -1364,14 +1351,19 @@ if __name__ == '__main__':
     
     def draw():
         with ctx:
-            #ico = ctx.loadTexture('Test/icon.ico')
+            ico = ctx.loadTexture('Test/icon.ico')
             ctx.regFont('Phigros', 'Test/font.ttf')
         while True:
             with ctx:
                 ctx.reset()
                 ctx.font = '20px Phigros'
                 
-            
+                ctx.drawImage(ico, 0, 0, 233, 320)
+
+                imageData = ctx.getImageData(10, 20, 80, 230)
+                ctx.putImageData(imageData, 260, 0)
+                ctx.putImageData(imageData, 380, 50)
+                ctx.putImageData(imageData, 500, 100)
             time.sleep(1 / 60)
 
     Thread(target = draw, daemon = True).start()
